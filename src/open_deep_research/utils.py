@@ -5,9 +5,14 @@ import logging
 import os
 import warnings
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 import aiohttp
+
+try:
+    from exa_py import AsyncExa
+except ImportError:  # pragma: no cover - exercised via runtime guard
+    AsyncExa = None
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -43,6 +48,7 @@ def build_chat_model(
     api_key: str | None,
     *,
     tags: list[str] | None = None,
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None,
 ) -> ChatOpenAI:
     """Build a ChatOpenAI instance using current OpenAI parameter conventions."""
     base_url = os.getenv("OPENAI_ENDPOINT")
@@ -50,6 +56,7 @@ def build_chat_model(
         model=_strip_openai_prefix(model_name),
         api_key=api_key,
         base_url=base_url,
+        reasoning_effort=reasoning_effort,
         max_completion_tokens=max_completion_tokens,
         tags=tags,
     )
@@ -408,22 +415,93 @@ async def load_mcp_tools(
 # Tool Utils
 ##########################
 
+def _get_exa_result_value(result: Any, *field_names: str) -> Any:
+    """Read a field from an Exa SDK result object or dict."""
+    for field_name in field_names:
+        if isinstance(result, dict) and field_name in result:
+            return result[field_name]
+
+        value = getattr(result, field_name, None)
+        if value is not None:
+            return value
+
+    return None
+
+
+def _format_exa_search_response(query: str, results: list[Any]) -> str:
+    """Convert Exa search results into a deterministic text block for the model."""
+    if not results:
+        return f"No Exa results found for query: {query}"
+
+    formatted_results: list[str] = []
+    for index, result in enumerate(results, start=1):
+        title = _get_exa_result_value(result, "title") or "Untitled"
+        url = _get_exa_result_value(result, "url") or "Unknown URL"
+        published_date = _get_exa_result_value(result, "published_date", "publishedDate")
+        highlights = _get_exa_result_value(result, "highlights") or []
+        if isinstance(highlights, str):
+            highlights = [highlights]
+
+        result_lines = [
+            f"Result {index}:",
+            f"Title: {title}",
+            f"URL: {url}",
+        ]
+        if published_date:
+            result_lines.append(f"Published: {published_date}")
+
+        result_lines.append("Highlights:")
+        if highlights:
+            result_lines.extend(f"- {highlight}" for highlight in highlights)
+        else:
+            result_lines.append("- No highlights returned.")
+
+        formatted_results.append("\n".join(result_lines))
+
+    return "\n\n".join(formatted_results)
+
+
+@tool("exa_search", description="Search the web with Exa and return result metadata plus highlights.")
+async def exa_search(
+    query: str,
+    num_results: int = 5,
+    include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None,
+) -> str:
+    """Search the web using Exa and return a compact, citation-friendly result block."""
+    exa_api_key = os.getenv("EXA_API_KEY")
+    if not exa_api_key:
+        return "Exa search is unavailable: EXA_API_KEY is not set."
+
+    if AsyncExa is None:
+        return "Exa search is unavailable: exa-py is not installed."
+
+    try:
+        exa_client = AsyncExa(api_key=exa_api_key)
+        response = await exa_client.search(
+            query,
+            num_results=num_results,
+            include_domains=include_domains,
+            exclude_domains=exclude_domains,
+            contents={"highlights": {"max_characters": 2000}},
+        )
+    except Exception as exc:
+        return f"Exa search failed: {exc}"
+
+    return _format_exa_search_response(query, getattr(response, "results", []))
+
+
 async def get_search_tool(search_api: SearchAPI):
     """Configure and return search tools based on the specified API provider.
     
     Args:
-        search_api: The search API provider to use (OpenAI or None)
+        search_api: The search API provider to use.
         
     Returns:
         List of configured search tool objects for the specified provider
     """
-    if search_api == SearchAPI.OPENAI:
-        # OpenAI's web search preview functionality
-        return [{"type": "web_search_preview"}]
-
-    if search_api == SearchAPI.NONE:
-        # No search functionality configured
-        return []
+    if search_api == SearchAPI.EXA:
+        return [exa_search]
         
     # Default fallback for unknown search API types
     return []
@@ -461,27 +539,6 @@ async def get_all_tools(config: RunnableConfig):
 def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]):
     """Extract notes from tool call messages."""
     return [tool_msg.content for tool_msg in filter_messages(messages, include_types="tool")]
-
-def openai_websearch_called(response):
-    """Detect if OpenAI's web search functionality was used in the response.
-    
-    Args:
-        response: The response object from OpenAI's API
-        
-    Returns:
-        True if web search was called, False otherwise
-    """
-    # Check for tool outputs in the response metadata
-    tool_outputs = response.additional_kwargs.get("tool_outputs")
-    if not tool_outputs:
-        return False
-    
-    # Look for web search calls in the tool outputs
-    for tool_output in tool_outputs:
-        if tool_output.get("type") == "web_search_call":
-            return True
-    
-    return False
 
 
 ##########################

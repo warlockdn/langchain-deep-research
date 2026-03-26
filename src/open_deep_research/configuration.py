@@ -13,8 +13,7 @@ DEFAULT_OPENAI_MODEL = f"openai:{os.getenv('OPENAI_MODEL', 'gpt-5.4-mini')}"
 class SearchAPI(Enum):
     """Enumeration of available search API providers."""
 
-    OPENAI = "openai"
-    NONE = "none"
+    EXA = "exa"
 
 class MCPConfig(BaseModel):
     """Configuration for Model Context Protocol (MCP) servers."""
@@ -76,15 +75,14 @@ class Configuration(BaseModel):
     )
     # Research Configuration
     search_api: SearchAPI = Field(
-        default=SearchAPI.OPENAI,
+        default=SearchAPI.EXA,
         metadata={
             "x_oap_ui_config": {
                 "type": "select",
-                "default": "openai",
+                "default": "exa",
                 "description": "Search API to use for research.",
                 "options": [
-                    {"label": "OpenAI Native Web Search", "value": SearchAPI.OPENAI.value},
-                    {"label": "None", "value": SearchAPI.NONE.value}
+                    {"label": "Exa", "value": SearchAPI.EXA.value}
                 ]
             }
         }

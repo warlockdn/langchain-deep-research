@@ -2,7 +2,7 @@
 
 <img width="1388" height="298" alt="full_diagram" src="https://github.com/user-attachments/assets/12a2371b-8be2-4219-9b48-90503eb43c69" />
 
-Deep research has broken out as one of the most popular agent applications. This is a simple, configurable, fully open source deep research agent built around OpenAI models, OpenAI native web search, and MCP servers. It's performance is on par with many popular deep research agents ([see Deep Research Bench leaderboard](https://huggingface.co/spaces/Ayanami0730/DeepResearch-Leaderboard)).
+Deep research has broken out as one of the most popular agent applications. This is a simple, configurable, fully open source deep research agent built around OpenAI models, Exa web search, and MCP servers. It's performance is on par with many popular deep research agents ([see Deep Research Bench leaderboard](https://huggingface.co/spaces/Ayanami0730/DeepResearch-Leaderboard)).
 
 <img width="817" height="666" alt="Screenshot 2025-07-13 at 11 21 12 PM" src="https://github.com/user-attachments/assets/052f2ed3-c664-4a4f-8ec2-074349dcaa3f" />
 
@@ -72,7 +72,7 @@ Open Deep Research uses OpenAI chat models for a few different tasks. See the be
 
 #### Search API :mag:
 
-Open Deep Research uses OpenAI native web search, with an option to disable search entirely. MCP tools can also be layered in via `mcp_config`. See the `search_api` and `mcp_config` fields in the [configuration.py](https://github.com/langchain-ai/open_deep_research/blob/main/src/open_deep_research/configuration.py) file for more details. This can be accessed via the LangGraph Studio UI. 
+Open Deep Research uses Exa as its built-in search backend. MCP tools can also be layered in via `mcp_config`. See the `search_api` and `mcp_config` fields in the [configuration.py](https://github.com/langchain-ai/open_deep_research/blob/main/src/open_deep_research/configuration.py) file for more details. This can be accessed via the LangGraph Studio UI. Make sure `EXA_API_KEY` is set in your environment before running searches.
 
 #### Other 
 
