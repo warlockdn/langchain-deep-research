@@ -204,7 +204,6 @@ Only these fully comprehensive cleaned findings are going to be returned to the 
 
 <Output Format>
 The report should be structured like this:
-**List of Queries and Tool Calls Made**
 **Fully Comprehensive Findings**
 **List of All Relevant Sources (with citations in the report)**
 </Output Format>
@@ -213,9 +212,6 @@ The report should be structured like this:
 - Assign each unique URL a single citation number in your text
 - End with ### Sources that lists each source with corresponding numbers
 - IMPORTANT: Number sources sequentially without gaps (1,2,3,4...) in the final list regardless of which sources you choose
-- Example format:
-  [1] Source Title: URL
-  [2] Source Title: URL
 </Citation Rules>
 
 Critical Reminder: It is extremely important that any information that is even remotely relevant to the user's research topic is preserved verbatim (e.g. don't rewrite it, don't summarize it, don't paraphrase it).

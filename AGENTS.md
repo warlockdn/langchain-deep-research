@@ -21,14 +21,6 @@ Open Deep Research is a configurable, fully open-source deep research agent that
 - `utils.py` - Utility functions and helpers
 - `files/` - Research output and example files
 
-### Legacy Implementations (`src/legacy/`)
-Contains two earlier research implementations:
-- `graph.py` - Plan-and-execute workflow with human-in-the-loop
-- `multi_agent.py` - Supervisor-researcher multi-agent architecture
-- `legacy.md` - Documentation for legacy implementations
-- `AGENTS.md` - Legacy-specific Codex instructions
-- `tests/` - Legacy-specific tests
-
 ### Runtime Configuration
 - `langgraph.json` - LangGraph server configuration without a custom auth hook
 

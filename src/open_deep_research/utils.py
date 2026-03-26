@@ -130,7 +130,7 @@ def think_tool(reflection: str) -> str:
     Returns:
         Confirmation that reflection was recorded for decision-making
     """
-    return f"Reflection recorded: {reflection}"
+    return f"Reflection recorded"
 
 ##########################
 # MCP Utils
