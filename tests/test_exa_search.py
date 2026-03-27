@@ -96,7 +96,7 @@ def test_researcher_tools_ignores_old_openai_native_search_metadata():
     }
     config = {"configurable": {"search_api": "exa"}}
 
-    result = asyncio.run(deep_researcher.researcher_tools(state, config))
+    result = asyncio.run(deep_researcher.researcher_tools(state, config, writer=lambda payload: None))
 
     assert result.goto == "compress_research"
     assert result.update is None
@@ -130,7 +130,7 @@ def test_researcher_tools_executes_exa_tool_calls(monkeypatch):
     }
     config = {"configurable": {"search_api": "exa", "max_react_tool_calls": 10}}
 
-    result = asyncio.run(deep_researcher.researcher_tools(state, config))
+    result = asyncio.run(deep_researcher.researcher_tools(state, config, writer=lambda payload: None))
 
     assert result.goto == "researcher"
     assert result.update["researcher_messages"] == [
