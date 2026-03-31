@@ -1,9 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage, ToolMessage
-
-from open_deep_research import deep_researcher, utils
+from open_deep_research import utils
 from open_deep_research.configuration import Configuration, SearchAPI
 
 
@@ -81,58 +79,3 @@ def test_exa_search_returns_clear_error_when_api_key_missing(monkeypatch):
     assert result == "Exa search is unavailable: EXA_API_KEY is not set."
 
 
-def test_researcher_tools_ignores_old_openai_native_search_metadata():
-    state = {
-        "researcher_messages": [
-            AIMessage(
-                content="done",
-                tool_calls=[],
-                additional_kwargs={
-                    "tool_outputs": [{"type": "web_search_call"}],
-                },
-            )
-        ],
-        "tool_call_iterations": 0,
-    }
-    config = {"configurable": {"search_api": "exa"}}
-
-    result = asyncio.run(deep_researcher.researcher_tools(state, config))
-
-    assert result.goto == "compress_research"
-    assert result.update is None
-
-
-def test_researcher_tools_executes_exa_tool_calls(monkeypatch):
-    class FakeTool:
-        name = "exa_search"
-
-        async def ainvoke(self, args, config):
-            assert args == {"query": "latest AI chip news"}
-            assert config["configurable"]["search_api"] == "exa"
-            return "search output"
-
-    monkeypatch.setattr(deep_researcher, "get_all_tools", lambda config: asyncio.sleep(0, result=[FakeTool()]))
-
-    state = {
-        "researcher_messages": [
-            AIMessage(
-                content="searching",
-                tool_calls=[
-                    {
-                        "name": "exa_search",
-                        "args": {"query": "latest AI chip news"},
-                        "id": "call-1",
-                    }
-                ],
-            )
-        ],
-        "tool_call_iterations": 1,
-    }
-    config = {"configurable": {"search_api": "exa", "max_react_tool_calls": 10}}
-
-    result = asyncio.run(deep_researcher.researcher_tools(state, config))
-
-    assert result.goto == "researcher"
-    assert result.update["researcher_messages"] == [
-        ToolMessage(content="search output", name="exa_search", tool_call_id="call-1")
-    ]

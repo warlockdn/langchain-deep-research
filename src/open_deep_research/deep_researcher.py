@@ -3,6 +3,7 @@
 import asyncio
 from typing import Literal
 
+from langchain.agents import create_agent
 from langchain_core.messages import (
     AIMessage,
     HumanMessage,
@@ -316,7 +317,7 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
         # Execute research tasks in parallel while preserving successful siblings.
         research_tasks = [
             researcher_subgraph.ainvoke({
-                "researcher_messages": [
+                "messages": [
                     HumanMessage(content=tool_call["args"]["research_topic"])
                 ],
                 "research_topic": tool_call["args"]["research_topic"]
@@ -394,143 +395,58 @@ supervisor_builder.add_edge(START, "supervisor")  # Entry point to supervisor
 # Compile supervisor subgraph for use in main workflow
 supervisor_subgraph = supervisor_builder.compile()
 
-async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[Literal["researcher_tools"]]:
-    """Individual researcher that conducts focused research on specific topics.
-    
-    This researcher is given a specific research topic by the supervisor and uses
-    available tools (search, think_tool, MCP tools) to gather comprehensive information.
-    It can use think_tool for strategic planning between searches.
-    
+async def researcher_agent_node(state: ResearcherState, config: RunnableConfig) -> dict:
+    """Run a create_agent ReAct loop for a single research topic.
+
+    Replaces the old hand-rolled researcher + researcher_tools nodes.
+    create_agent handles the LLM-call → tool-execution → loop cycle internally.
+    The result messages are written back to state so compress_research can read them.
+
     Args:
-        state: Current researcher state with messages and topic context
+        state: Current researcher state containing the initial research message
         config: Runtime configuration with model settings and tool availability
-        
+
     Returns:
-        Command to proceed to researcher_tools for tool execution
+        Dictionary updating messages with the full agent conversation
     """
-    # Step 1: Load configuration and validate tool availability
     configurable = Configuration.from_runnable_config(config)
-    researcher_messages = state.get("researcher_messages", [])
-    
-    # Get all available research tools (search, MCP, think_tool)
+
     tools = await get_all_tools(config)
     if len(tools) == 0:
         raise ValueError(
             "No tools found to conduct research: Please configure either your "
             "search API or add MCP tools to your configuration."
         )
-    
-    # Step 2: Configure the researcher model with tools
-    # Prepare system prompt with MCP context if available
+
+    model = build_chat_model(
+        configurable.research_model,
+        configurable.research_model_max_tokens,
+        get_api_key_for_model(configurable.research_model, config),
+        tags=[TAG_NOSTREAM],
+    )
+
     researcher_prompt = research_system_prompt.format(
-        mcp_prompt=configurable.mcp_prompt or "", 
+        mcp_prompt=configurable.mcp_prompt or "",
         date=get_today_str()
     )
-    
-    # Configure model with tools, retry logic, and settings
-    research_model = (
-        build_chat_model(
-            configurable.research_model,
-            configurable.research_model_max_tokens,
-            get_api_key_for_model(configurable.research_model, config),
-            tags=[TAG_NOSTREAM],
-        )
-        .bind_tools(tools)
-        .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
-    )
-    
-    # Step 3: Generate researcher response with system context
-    messages = [SystemMessage(content=researcher_prompt)] + researcher_messages
-    response = await research_model.ainvoke(messages)
-    
-    # Step 4: Update state and proceed to tool execution
-    return Command(
-        goto="researcher_tools",
-        update={
-            "researcher_messages": [response],
-            "tool_call_iterations": state.get("tool_call_iterations", 0) + 1
-        }
+
+    agent = create_agent(
+        model=model,
+        tools=tools,
+        system_prompt=researcher_prompt,
+        name="researcher",
     )
 
-# Tool Execution Helper Function
-async def execute_tool_safely(tool, args, config):
-    """Safely execute a tool with error handling."""
-    try:
-        return await tool.ainvoke(args, config)
-    except Exception as e:
-        return f"Error executing tool: {str(e)}"
+    # max_react_tool_calls=N means N tool-call rounds.
+    # Each round = 1 model step + 1 tool step = 2 graph steps, plus 1 final model step.
+    recursion_limit = configurable.max_react_tool_calls * 2 + 1
 
+    result = await agent.ainvoke(
+        {"messages": state["messages"]},
+        {**config, "recursion_limit": recursion_limit},
+    )
 
-async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> Command[Literal["researcher", "compress_research"]]:
-    """Execute tools called by the researcher, including search tools and strategic thinking.
-    
-    This function handles various types of researcher tool calls:
-    1. think_tool - Strategic reflection that continues the research conversation
-    2. Search tools (exa_search) - Information gathering
-    3. MCP tools - External tool integrations
-    4. ResearchComplete - Signals completion of individual research task
-    
-    Args:
-        state: Current researcher state with messages and iteration count
-        config: Runtime configuration with research limits and tool settings
-        
-    Returns:
-        Command to either continue research loop or proceed to compression
-    """
-    # Step 1: Extract current state and check early exit conditions
-    configurable = Configuration.from_runnable_config(config)
-    researcher_messages = state.get("researcher_messages", [])
-    most_recent_message = researcher_messages[-1]
-    
-    # Early exit if no tool calls were made
-    has_tool_calls = bool(most_recent_message.tool_calls)
-    if not has_tool_calls:
-        return Command(goto="compress_research")
-    
-    # Step 2: Handle other tool calls (search, MCP tools, etc.)
-    tools = await get_all_tools(config)
-    tools_by_name = {
-        tool.name if hasattr(tool, "name") else tool.get("name", "web_search"): tool 
-        for tool in tools
-    }
-    
-    # Execute all tool calls in parallel
-    tool_calls = most_recent_message.tool_calls
-    tool_execution_tasks = [
-        execute_tool_safely(tools_by_name[tool_call["name"]], tool_call["args"], config) 
-        for tool_call in tool_calls
-    ]
-    observations = await asyncio.gather(*tool_execution_tasks)
-    
-    # Create tool messages from execution results
-    tool_outputs = [
-        ToolMessage(
-            content=observation,
-            name=tool_call["name"],
-            tool_call_id=tool_call["id"]
-        ) 
-        for observation, tool_call in zip(observations, tool_calls)
-    ]
-    
-    # Step 3: Check late exit conditions (after processing tools)
-    exceeded_iterations = state.get("tool_call_iterations", 0) >= configurable.max_react_tool_calls
-    research_complete_called = any(
-        tool_call["name"] == "ResearchComplete" 
-        for tool_call in most_recent_message.tool_calls
-    )
-    
-    if exceeded_iterations or research_complete_called:
-        # End research and proceed to compression
-        return Command(
-            goto="compress_research",
-            update={"researcher_messages": tool_outputs}
-        )
-    
-    # Continue research loop with tool results
-    return Command(
-        goto="researcher",
-        update={"researcher_messages": tool_outputs}
-    )
+    return {"messages": result["messages"]}
 
 async def compress_research(state: ResearcherState, config: RunnableConfig):
     """Compress and synthesize research findings into a concise, structured summary.
@@ -556,52 +472,52 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     )
     
     # Step 2: Prepare messages for compression
-    researcher_messages = state.get("researcher_messages", [])
-    
+    messages = list(state.get("messages", []))
+
     # Add instruction to switch from research mode to compression mode
-    researcher_messages.append(HumanMessage(content=compress_research_simple_human_message))
-    
+    messages.append(HumanMessage(content=compress_research_simple_human_message))
+
     # Step 3: Attempt compression with retry logic for token limit issues
     synthesis_attempts = 0
     max_attempts = 3
-    
+
     while synthesis_attempts < max_attempts:
         try:
             # Create system prompt focused on compression task
             compression_prompt = compress_research_system_prompt.format(date=get_today_str())
-            messages = [SystemMessage(content=compression_prompt)] + researcher_messages
-            
+            compression_messages = [SystemMessage(content=compression_prompt)] + messages
+
             # Execute compression
-            response = await synthesizer_model.ainvoke(messages)
-            
+            response = await synthesizer_model.ainvoke(compression_messages)
+
             # Extract raw notes from all tool and AI messages
             raw_notes_content = "\n".join([
-                str(message.content) 
-                for message in filter_messages(researcher_messages, include_types=["tool", "ai"])
+                str(message.content)
+                for message in filter_messages(messages, include_types=["tool", "ai"])
             ])
-            
+
             # Return successful compression result
             return {
                 "compressed_research": str(response.content),
                 "raw_notes": [raw_notes_content],
                 **_trace_message_update(response),
             }
-            
+
         except Exception as e:
             synthesis_attempts += 1
-            
+
             # Handle token limit exceeded by removing older messages
             if is_token_limit_exceeded(e, configurable.research_model):
-                researcher_messages = remove_up_to_last_ai_message(researcher_messages)
+                messages = remove_up_to_last_ai_message(messages)
                 continue
-            
+
             # For other errors, continue retrying
             continue
-    
+
     # Step 4: Return error result if all attempts failed
     raw_notes_content = "\n".join([
-        str(message.content) 
-        for message in filter_messages(researcher_messages, include_types=["tool", "ai"])
+        str(message.content)
+        for message in filter_messages(messages, include_types=["tool", "ai"])
     ])
     
     return {
@@ -610,22 +526,19 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     }
 
 # Researcher Subgraph Construction
-# Creates individual researcher workflow for conducting focused research on specific topics
+# create_agent handles the ReAct loop; compress_research post-processes the findings.
 researcher_builder = StateGraph(
-    ResearcherState, 
+    ResearcherState,
     output=ResearcherOutputState,
 )
 
-# Add researcher nodes for research execution and compression
-researcher_builder.add_node("researcher", researcher)                 # Main researcher logic
-researcher_builder.add_node("researcher_tools", researcher_tools)     # Tool execution handler
-researcher_builder.add_node("compress_research", compress_research)   # Research compression
+researcher_builder.add_node("researcher", researcher_agent_node)
+researcher_builder.add_node("compress_research", compress_research)
 
-# Define researcher workflow edges
-researcher_builder.add_edge(START, "researcher")           # Entry point to researcher
-researcher_builder.add_edge("compress_research", END)      # Exit point after compression
+researcher_builder.add_edge(START, "researcher")
+researcher_builder.add_edge("researcher", "compress_research")
+researcher_builder.add_edge("compress_research", END)
 
-# Compile researcher subgraph for parallel execution by supervisor
 researcher_subgraph = researcher_builder.compile()
 
 async def final_report_generation(state: AgentState, config: RunnableConfig):
