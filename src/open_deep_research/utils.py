@@ -30,6 +30,7 @@ from langchain_core.tools import (
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.config import get_store
+from langgraph.constants import TAG_NOSTREAM
 from mcp import McpError
 
 from open_deep_research.configuration import Configuration, SearchAPI
@@ -40,6 +41,20 @@ from open_deep_research.state import ResearchComplete
 def _strip_openai_prefix(model_name: str) -> str:
     """Normalize an openai:model identifier to the provider-local model id."""
     return model_name.split(":", 1)[1] if model_name.startswith("openai:") else model_name
+
+
+def _normalize_model_tags(tags: list[str] | None) -> list[str] | None:
+    """Normalize legacy streaming tags to the current LangGraph constant."""
+    if not tags:
+        return tags
+
+    normalized_tags: list[str] = []
+    for tag in tags:
+        normalized_tag = TAG_NOSTREAM if tag == "langsmith:nostream" else tag
+        if normalized_tag not in normalized_tags:
+            normalized_tags.append(normalized_tag)
+
+    return normalized_tags
 
 
 def build_chat_model(
@@ -58,7 +73,8 @@ def build_chat_model(
         base_url=base_url,
         reasoning_effort=reasoning_effort,
         max_completion_tokens=max_completion_tokens,
-        tags=tags,
+        stream_usage=True,
+        tags=_normalize_model_tags(tags),
     )
 
 async def summarize_webpage(model: BaseChatModel, webpage_content: str) -> str:
@@ -130,7 +146,7 @@ def think_tool(reflection: str) -> str:
     Returns:
         Confirmation that reflection was recorded for decision-making
     """
-    return f"Reflection recorded"
+    return "Reflection recorded"
 
 ##########################
 # MCP Utils

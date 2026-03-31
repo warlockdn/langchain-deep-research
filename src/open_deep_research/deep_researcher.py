@@ -12,6 +12,7 @@ from langchain_core.messages import (
     get_buffer_string,
 )
 from langchain_core.runnables import RunnableConfig
+from langgraph.constants import TAG_NOSTREAM
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
@@ -51,6 +52,16 @@ from open_deep_research.utils import (
 )
 
 
+def _trace_message_update(message: AIMessage) -> dict[str, dict[str, list[AIMessage] | str]]:
+    """Expose raw model messages for LangGraph message streaming and token tracing."""
+    return {
+        "trace_messages": {
+            "type": "override",
+            "value": [message],
+        }
+    }
+
+
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Command[Literal["write_research_brief", "__end__"]]:
     """Analyze user messages and ask clarifying questions if the research scope is unclear.
     
@@ -77,9 +88,9 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
             configurable.research_model,
             configurable.research_model_max_tokens,
             get_api_key_for_model(configurable.research_model, config),
-            tags=["langsmith:nostream"],
+            tags=[TAG_NOSTREAM],
         )
-        .with_structured_output(ClarifyWithUser)
+        .with_structured_output(ClarifyWithUser, include_raw=True)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
     )
     
@@ -88,20 +99,30 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Comman
         messages=get_buffer_string(messages), 
         date=get_today_str()
     )
-    response = await clarification_model.ainvoke([HumanMessage(content=prompt_content)])
-    
+    structured_response = await clarification_model.ainvoke([HumanMessage(content=prompt_content)])
+    if structured_response["parsing_error"] is not None:
+        raise structured_response["parsing_error"]
+    response = structured_response["parsed"]
+    raw_response = structured_response["raw"]
+
     # Step 4: Route based on clarification analysis
     if response.need_clarification:
         # End with clarifying question for user
         return Command(
             goto=END, 
-            update={"messages": [AIMessage(content=response.question)]}
+            update={
+                "messages": [AIMessage(content=response.question)],
+                **_trace_message_update(raw_response),
+            }
         )
     else:
         # Proceed to research with verification message
         return Command(
             goto="write_research_brief", 
-            update={"messages": [AIMessage(content=response.verification)]}
+            update={
+                "messages": [AIMessage(content=response.verification)],
+                **_trace_message_update(raw_response),
+            }
         )
 
 
@@ -127,9 +148,9 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
             configurable.research_model,
             configurable.research_model_max_tokens,
             get_api_key_for_model(configurable.research_model, config),
-            tags=["langsmith:nostream"],
+            tags=[TAG_NOSTREAM],
         )
-        .with_structured_output(ResearchQuestion)
+        .with_structured_output(ResearchQuestion, include_raw=True)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
     )
     
@@ -138,7 +159,11 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         messages=get_buffer_string(state.get("messages", [])),
         date=get_today_str()
     )
-    response = await research_model.ainvoke([HumanMessage(content=prompt_content)])
+    structured_response = await research_model.ainvoke([HumanMessage(content=prompt_content)])
+    if structured_response["parsing_error"] is not None:
+        raise structured_response["parsing_error"]
+    response = structured_response["parsed"]
+    raw_response = structured_response["raw"]
     
     # Step 3: Initialize supervisor with research brief and instructions
     supervisor_system_prompt = lead_researcher_prompt.format(
@@ -151,6 +176,7 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
         goto="research_supervisor", 
         update={
             "research_brief": response.research_brief,
+            **_trace_message_update(raw_response),
             "supervisor_messages": {
                 "type": "override",
                 "value": [
@@ -187,7 +213,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> Command[
             configurable.research_model,
             configurable.research_model_max_tokens,
             get_api_key_for_model(configurable.research_model, config),
-            tags=["langsmith:nostream"],
+            tags=[TAG_NOSTREAM],
         )
         .bind_tools(lead_researcher_tools)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
@@ -385,7 +411,7 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[
             configurable.research_model,
             configurable.research_model_max_tokens,
             get_api_key_for_model(configurable.research_model, config),
-            tags=["langsmith:nostream"],
+            tags=[TAG_NOSTREAM],
         )
         .bind_tools(tools)
         .with_retry(stop_after_attempt=configurable.max_structured_output_retries)
@@ -504,7 +530,7 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
         configurable.compression_model,
         configurable.compression_model_max_tokens,
         get_api_key_for_model(configurable.compression_model, config),
-        tags=["langsmith:nostream"],
+        tags=[TAG_NOSTREAM],
     )
     
     # Step 2: Prepare messages for compression
@@ -535,7 +561,8 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
             # Return successful compression result
             return {
                 "compressed_research": str(response.content),
-                "raw_notes": [raw_notes_content]
+                "raw_notes": [raw_notes_content],
+                **_trace_message_update(response),
             }
             
         except Exception as e:
@@ -619,7 +646,7 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
                 configurable.final_report_model,
                 configurable.final_report_model_max_tokens,
                 get_api_key_for_model(configurable.final_report_model, config),
-                tags=["langsmith:nostream"],
+                tags=[TAG_NOSTREAM],
             ).ainvoke([
                 HumanMessage(content=final_report_prompt)
             ])
