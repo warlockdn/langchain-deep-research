@@ -241,6 +241,10 @@ Here are the findings from the research that you conducted:
 {findings}
 </Findings>
 
+The findings may contain two sections:
+- "Compressed findings" are the cleaned delegated research summaries and should be treated as the primary synthesized evidence.
+- "Raw evidence" is supplemental detail gathered during research and should be used to preserve useful facts, source references, and nuance.
+
 Please create a detailed answer to the overall research brief that:
 1. Is well-organized with proper headings (# for title, ## for sections, ### for subsections)
 2. Includes specific facts and insights from the research

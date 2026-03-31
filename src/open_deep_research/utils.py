@@ -553,8 +553,12 @@ async def get_all_tools(config: RunnableConfig):
     return tools
 
 def get_notes_from_tool_calls(messages: list[MessageLikeRepresentation]):
-    """Extract notes from tool call messages."""
-    return [tool_msg.content for tool_msg in filter_messages(messages, include_types="tool")]
+    """Extract only delegated research results from tool call messages."""
+    return [
+        tool_msg.content
+        for tool_msg in filter_messages(messages, include_types="tool")
+        if getattr(tool_msg, "name", None) == "ConductResearch"
+    ]
 
 
 ##########################
