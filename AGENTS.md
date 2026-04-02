@@ -31,17 +31,10 @@ Open Deep Research is a configurable, fully open-source deep research agent that
 - `pairwise_evaluation.py` - Comparative evaluation tools
 - `supervisor_parallel_evaluation.py` - Multi-threaded evaluation
 
-### Examples (`examples/`)
-- `arxiv.md` - ArXiv research example
-- `pubmed.md` - PubMed research example
-- `inference-market.md` - Inference market analysis examples
-
 ## Key Technologies
 - **LangGraph** - Workflow orchestration and graph execution
 - **LangChain** - LLM integration and tool calling
-- **Multiple LLM Providers** - OpenAI, Anthropic, Google, Groq, DeepSeek support
-- **Search APIs** - Tavily, OpenAI/Anthropic native search, DuckDuckGo, Exa
-- **MCP Servers** - Model Context Protocol for extended capabilities
+- **Search APIs** - Exa
 
 ## Development Commands
 - `uvx langgraph dev` - Start development server with LangGraph Studio
