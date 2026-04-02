@@ -8,11 +8,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Literal
 
 import aiohttp
-
-try:
-    from exa_py import AsyncExa
-except ImportError:  # pragma: no cover - exercised via runtime guard
-    AsyncExa = None
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -36,6 +31,11 @@ from mcp import McpError
 from open_deep_research.configuration import Configuration, SearchAPI
 from open_deep_research.prompts import summarize_webpage_prompt
 from open_deep_research.state import ResearchComplete
+from open_deep_research.tools.exa import exa_search, is_exa_search_enabled
+from open_deep_research.tools.pgvector import (
+    document_search,
+    has_document_search_config,
+)
 
 
 def _strip_openai_prefix(model_name: str) -> str:
@@ -426,87 +426,6 @@ async def load_mcp_tools(
     
     return configured_tools
 
-
-##########################
-# Tool Utils
-##########################
-
-def _get_exa_result_value(result: Any, *field_names: str) -> Any:
-    """Read a field from an Exa SDK result object or dict."""
-    for field_name in field_names:
-        if isinstance(result, dict) and field_name in result:
-            return result[field_name]
-
-        value = getattr(result, field_name, None)
-        if value is not None:
-            return value
-
-    return None
-
-
-def _format_exa_search_response(query: str, results: list[Any]) -> str:
-    """Convert Exa search results into a deterministic text block for the model."""
-    if not results:
-        return f"No Exa results found for query: {query}"
-
-    formatted_results: list[str] = []
-    for index, result in enumerate(results, start=1):
-        title = _get_exa_result_value(result, "title") or "Untitled"
-        url = _get_exa_result_value(result, "url") or "Unknown URL"
-        published_date = _get_exa_result_value(result, "published_date", "publishedDate")
-        highlights = _get_exa_result_value(result, "highlights") or []
-        if isinstance(highlights, str):
-            highlights = [highlights]
-
-        result_lines = [
-            f"Result {index}:",
-            f"Title: {title}",
-            f"URL: {url}",
-        ]
-        if published_date:
-            result_lines.append(f"Published: {published_date}")
-
-        result_lines.append("Highlights:")
-        if highlights:
-            result_lines.extend(f"- {highlight}" for highlight in highlights)
-        else:
-            result_lines.append("- No highlights returned.")
-
-        formatted_results.append("\n".join(result_lines))
-
-    return "\n\n".join(formatted_results)
-
-
-@tool("exa_search", description="Search the web with Exa and return result metadata plus highlights.")
-async def exa_search(
-    query: str,
-    num_results: int = 5,
-    include_domains: list[str] | None = None,
-    exclude_domains: list[str] | None = None,
-) -> str:
-    """Search the web using Exa and return a compact, citation-friendly result block."""
-    exa_api_key = os.getenv("EXA_API_KEY")
-    if not exa_api_key:
-        return "Exa search is unavailable: EXA_API_KEY is not set."
-
-    if AsyncExa is None:
-        return "Exa search is unavailable: exa-py is not installed."
-
-    try:
-        exa_client = AsyncExa(api_key=exa_api_key)
-        response = await exa_client.search(
-            query,
-            num_results=num_results,
-            include_domains=include_domains,
-            exclude_domains=exclude_domains,
-            contents={"highlights": {"max_characters": 2000}},
-        )
-    except Exception as exc:
-        return f"Exa search failed: {exc}"
-
-    return _format_exa_search_response(query, getattr(response, "results", []))
-
-
 async def get_search_tool(search_api: SearchAPI):
     """Configure and return search tools based on the specified API provider.
     
@@ -516,11 +435,15 @@ async def get_search_tool(search_api: SearchAPI):
     Returns:
         List of configured search tool objects for the specified provider
     """
-    if search_api == SearchAPI.EXA:
-        return [exa_search]
+    tools: list[BaseTool] = []
+    if search_api == SearchAPI.EXA and is_exa_search_enabled():
+        tools.append(exa_search)
+
+    if has_document_search_config():
+        tools.append(document_search)
         
     # Default fallback for unknown search API types
-    return []
+    return tools
     
 async def get_all_tools(config: RunnableConfig):
     """Assemble complete toolkit including research, search, and MCP tools.
