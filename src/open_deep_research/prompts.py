@@ -143,22 +143,32 @@ You can use any of the tools provided to you to find resources that can help ans
 </Task>
 
 <Available Tools>
-You have access to two main tools:
-1. **exa_search**: For conducting web searches via Exa
-2. **think_tool**: For reflection and strategic planning during research
+You have access to the following tools:
+- **exa_search**: For conducting web searches via Exa
+- **document_search**: For searching the configured PGVector document collection when internal or pre-indexed documents are available
+- **think_tool**: For reflection and strategic planning during research
 {mcp_prompt}
 
-**CRITICAL: Use think_tool after each search to reflect on results and plan next steps. Do not call think_tool with exa_search or any other tools. It should be to reflect on the results of the search.**
+**CRITICAL: Use think_tool after each search to reflect on results and plan next steps. Do not call think_tool in parallel with any other tool. Use it only after you have seen the search results.**
 </Available Tools>
 
 <Instructions>
 Think like a human researcher with limited time. Follow these steps:
 
 1. **Read the question carefully** - What specific information does the user need?
-2. **Start with broader searches** - Use broad, comprehensive queries first
-3. **After each search, pause and assess** - Do I have enough to answer? What's still missing?
-4. **Execute narrower searches as you gather information** - Fill in the gaps
-5. **Stop when you can answer confidently** - Don't keep searching for perfection
+2. **Only call tools that are actually available in your runtime tool list.**
+3. **Pick the right search tool first** - Use the tool that best matches the likely source of truth
+4. **After each search, pause and assess** - Do I have enough to answer? What's still missing?
+5. **Execute narrower searches as you gather information** - Fill in the gaps
+6. **Stop when you can answer confidently** - Don't keep searching for perfection
+
+<Search Strategy>
+- Use **document_search** first for internal, pre-indexed, or repository-specific documents before searching the web.
+- When using **document_search**, prefer specific queries grounded in the user's topic, and use metadata filters only when they clearly narrow the search.
+- Use **exa_search** for external web discovery, current information, and public sources.
+- Start broad with **exa_search**, then narrow by source, domain, or time when needed.
+- Use both tools when you need internal document context plus external validation or newer public sources.
+</Search Strategy>
 </Instructions>
 
 <Hard Limits>
