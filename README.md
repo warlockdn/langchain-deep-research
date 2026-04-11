@@ -126,6 +126,114 @@ uv run python scripts/pdf_chunk_count.py \
 - By default, chunk records are written to `<input-dir>/pdf_chunks.jsonl` as JSONL with `source_file`, `chunk_index`, `page_content`, and `metadata`.
 - The script exits non-zero if a discovered PDF produces no chunks, and it prints the missing filenames explicitly instead of silently undercounting.
 
+### ⚡ FastAPI Server
+
+A lightweight HTTP API wraps the same `deep_researcher` graph so you can call it from any HTTP client without LangGraph Studio.
+
+#### Start
+
+```bash
+uv run uvicorn open_deep_research.api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Interactive docs are served at `http://localhost:8000/docs`.
+
+#### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/research` | Blocking – waits for the full report |
+| `POST` | `/research/stream` | SSE stream of graph update events |
+| `GET`  | `/health` | Liveness probe |
+
+#### Request format
+
+Both endpoints accept the same JSON body:
+
+```json
+{
+  "messages": [
+    {"role": "user", "content": "What are the latest advances in quantum error correction?"}
+  ],
+  "thread_id": "optional-existing-thread-id"
+}
+```
+
+`thread_id` is optional – omit it to start a fresh conversation. Use `"role": "ai"` for assistant turns when resuming a thread.
+
+#### Sample requests
+
+**Blocking (curl)**
+
+```bash
+curl -X POST http://localhost:8000/research \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "What are the latest advances in quantum error correction?"}
+    ]
+  }'
+```
+
+Response:
+
+```json
+{
+  "thread_id": "3f8a12bc-...",
+  "final_report": "## Quantum Error Correction in 2025\n\n..."
+}
+```
+
+**Streaming (curl)**
+
+```bash
+curl -N -X POST http://localhost:8000/research/stream \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [
+      {"role": "user", "content": "Give me a market overview of AI chip manufacturers."}
+    ]
+  }'
+```
+
+Each line is a `data: <json>` SSE event. The stream ends with `data: [DONE]`.
+
+**Python (httpx)**
+
+```python
+import httpx, json
+
+# blocking
+resp = httpx.post(
+    "http://localhost:8000/research",
+    json={
+        "messages": [
+            {"role": "user", "content": "Summarise CRISPR therapeutics progress in 2025."}
+        ]
+    },
+    timeout=300,
+)
+print(resp.json()["final_report"])
+
+# streaming
+with httpx.stream(
+    "POST",
+    "http://localhost:8000/research/stream",
+    json={
+        "messages": [
+            {"role": "user", "content": "Overview of fusion energy breakthroughs."}
+        ]
+    },
+    timeout=None,
+) as r:
+    for line in r.iter_lines():
+        if line.startswith("data:") and line != "data: [DONE]":
+            chunk = json.loads(line[5:])
+            print(chunk)
+```
+
+---
+
 ### 📊 Evaluation
 
 Open Deep Research is configured for evaluation with [Deep Research Bench](https://huggingface.co/spaces/Ayanami0730/DeepResearch-Leaderboard). This benchmark has 100 PhD-level research tasks (50 English, 50 Chinese), crafted by domain experts across 22 fields (e.g., Science & Tech, Business & Finance) to mirror real-world deep-research needs. It has 2 evaluation metrics, but the leaderboard is based on the RACE score.
