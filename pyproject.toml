@@ -46,7 +46,7 @@ build-backend = "setuptools.build_meta"
 packages = ["open_deep_research", "open_deep_research.tools", "tests"]
 
 [tool.setuptools.package-dir]
-"open_deep_research" = "src/open_deep_research"
+"" = "."
 "tests" = "tests"
 
 [tool.setuptools.package-data]
