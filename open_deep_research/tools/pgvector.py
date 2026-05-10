@@ -10,6 +10,11 @@ from langchain_core.tools import tool
 from langchain_openai import OpenAIEmbeddings
 from langchain_postgres import PGVector
 
+try:
+    from langchain_community.embeddings import FastEmbedEmbeddings
+except ImportError:  # pragma: no cover - optional until fastembed is installed
+    FastEmbedEmbeddings = None  # type: ignore[misc, assignment]
+
 
 def _strip_openai_prefix(model_name: str) -> str:
     """Normalize an openai:model identifier to the provider-local model id."""
@@ -28,6 +33,13 @@ def _get_document_search_embedding_model() -> str:
         or os.getenv("PGVECTOR_EMBEDDING_MODEL")
         or "text-embedding-3-small"
     )
+
+
+def _get_fastembed_model_name(explicit: str | None) -> str:
+    """Resolve FastEmbed model id for local PGVector ingestion."""
+    if explicit:
+        return explicit
+    return os.getenv("PGVECTOR_FASTEMBED_MODEL") or "BAAI/bge-small-en-v1.5"
 
 
 def _validate_pgvector_connection_string(connection_string: str) -> str | None:
@@ -79,6 +91,27 @@ def _get_pgvector_store(
     )
 
 
+@lru_cache(maxsize=8)
+def _get_pgvector_store_fastembed(
+    connection_string: str,
+    collection_name: str,
+    embedding_model: str,
+) -> PGVector:
+    """Construct and cache a PGVector client that uses FastEmbed local inference."""
+    if FastEmbedEmbeddings is None:
+        raise RuntimeError(
+            "FastEmbed ingestion requires `langchain-community` with the `fastembed` "
+            "package installed (`pip install fastembed`)."
+        )
+    return PGVector(
+        embeddings=FastEmbedEmbeddings(model_name=embedding_model),
+        collection_name=collection_name,
+        connection=connection_string,
+        use_jsonb=True,
+        create_extension=False,
+    )
+
+
 def _format_document_search_response(
     query: str,
     results: list[tuple[Any, float]],
@@ -123,6 +156,33 @@ def store_documents_in_pgvector(documents: list[Any]) -> dict[str, Any]:
     ids = [_document_id(document, index) for index, document in enumerate(documents, start=1)]
     vector_store.add_documents(documents=documents, ids=ids)
     return {"collection_name": collection_name, "count": len(ids)}
+
+
+def store_documents_in_pgvector_with_fastembed(
+    documents: list[Any],
+    *,
+    model_name: str | None = None,
+) -> dict[str, Any]:
+    """Store documents in PGVector using FastEmbed for local embedding inference.
+
+    Uses the same CONNECTION_STRING and COLLECTION_NAME as OpenAI-backed ingestion.
+    Query-time search (`document_search`) still uses the OpenAI embedding model unless
+    you align collection dimensionality and reconfigure search separately.
+    """
+    connection_string, collection_name = _get_pgvector_env_config()
+    resolved_model = _get_fastembed_model_name(model_name)
+    vector_store = _get_pgvector_store_fastembed(
+        connection_string,
+        collection_name,
+        resolved_model,
+    )
+    ids = [_document_id(document, index) for index, document in enumerate(documents, start=1)]
+    vector_store.add_documents(documents=documents, ids=ids)
+    return {
+        "collection_name": collection_name,
+        "count": len(ids),
+        "embedding_model": resolved_model,
+    }
 
 
 @tool(
