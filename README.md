@@ -71,17 +71,17 @@ See the fields in the [configuration.py](https://github.com/langchain-ai/open_de
 
 ### 📄 PDF Chunk Counting
 
-This repo includes a LangChain-driven PDF chunk counter. It loads local PDFs from `docs/` via LangChain's `PyPDFLoader`, optionally splits the extracted page documents into smaller chunks, and prints per-file and total chunk counts.
+This repo includes a LangChain-driven PDF chunk counter. It loads local PDFs from `docs/` via LangChain's `DoclingLoader`, optionally splits the extracted documents into smaller chunks, and prints per-file and total chunk counts.
 
-#### Install
+#### Local install
 
 ```bash
 uv sync
 ```
 
-The LangChain PyPDF integration is provided by `langchain-community` and `pypdf`. Optional post-load splitting uses `langchain-text-splitters`.
+The LangChain Docling integration is provided by `langchain-docling`. Optional post-load splitting uses `langchain-text-splitters`.
 
-#### Commands
+#### Local commands
 
 Run the chunk counter:
 
@@ -118,9 +118,51 @@ uv run python scripts/pdf_chunk_count.py \
   --pgvector
 ```
 
+#### Docker (standalone Docling image)
+
+The repo `Dockerfile` builds an AMD64 image that:
+- installs Docling using CPU-only PyTorch wheels,
+- pre-downloads Docling models during build (standalone runtime),
+- runs only `scripts/pdf_chunk_count.py` and accepts CLI args at `docker run`.
+
+Build image:
+
+```bash
+docker build -t pdf-chunker -f Dockerfile .
+```
+
+Show script help:
+
+```bash
+docker run --rm pdf-chunker
+```
+
+Run against mounted local docs:
+
+```bash
+docker run --rm \
+  -v "$(pwd)/docs:/app/docs" \
+  pdf-chunker \
+  --input-dir docs \
+  --output-file docs/pdf_chunks.jsonl
+```
+
+Split mode:
+
+```bash
+docker run --rm \
+  -v "$(pwd)/docs:/app/docs" \
+  pdf-chunker \
+  --input-dir docs \
+  --split \
+  --chunk-size 1000 \
+  --chunk-overlap 200 \
+  --output-file docs/pdf_chunks.jsonl
+```
+
 #### Notes
 
-- The script uses `PyPDFLoader` in `mode="page"`, so each returned LangChain `Document` is one PDF page.
+- The script uses `DoclingLoader` with `export_type="markdown"` and writes one JSONL record per returned LangChain `Document`.
 - When `--split` is set, the script applies LangChain's `RecursiveCharacterTextSplitter` to those page documents before writing JSONL.
 - When `--pgvector` is set, the script also stores the final emitted documents in the configured PGVector collection using `OPENAI_EMBEDDING_MODEL`, `CONNECTION_STRING`, and `COLLECTION_NAME`.
 - By default, chunk records are written to `<input-dir>/pdf_chunks.jsonl` as JSONL with `source_file`, `chunk_index`, `page_content`, and `metadata`.
@@ -287,3 +329,132 @@ You can also deploy your own instance of OAP, and make your own custom agents (l
 
 1. [Deploy Open Agent Platform](https://docs.oap.langchain.com/quickstart)
 2. [Add Deep Researcher to OAP](https://docs.oap.langchain.com/setup/agents)
+
+### Questions
+
+Good question. This handbook is **not something you ask “what is Medicaid?”**—it’s best used for **policy, configuration, compliance, and operating decisions**.
+
+Below is a **curated set of *high‑quality, detailed questions*** you can ask this document, grouped by intent. These are the kinds of questions **architects, product owners, ops, compliance, and bid teams** typically use it for.
+
+***
+
+## 1. Compliance & Regulatory Questions (Very strong fit)
+
+Ask these when you want **definitive, audit-safe answers**:
+
+*   *How does Express Scripts ensure compliance with federal MDRP rebate requirements at point of sale?*
+*   *What edits are applied to prevent payment for non‑rebate‑eligible drugs?*
+*   *How are HCFA NDC termination and obsolete dates enforced, and can run‑out periods be customized?*
+*   *What is the process when state Medicaid guidance changes after implementation?*
+*   *Who is responsible for monitoring new state regulations—plan or Express Scripts?*
+*   *How does Express Scripts support state readiness reviews and Medicaid audits?*
+*   *What prescriber validation checks are mandatory vs configurable by state?*
+
+✅ Best for: **Compliance reviews, regulator discussions, risk assessments**
+
+***
+
+## 2. Plan Setup & Configuration Questions
+
+Ask these when designing or onboarding a **Managed Medicaid plan**:
+
+*   *What BIN/PCN strategy is recommended for Managed Medicaid, and when should it differ?*
+*   *How are Medicaid population type codes assigned and maintained over time?*
+*   *What happens if multiple Medicaid populations are mixed in one eligibility group?*
+*   *How does real‑time eligibility updating work via eSD vs batch files?*
+*   *What data elements are required to support household-level accumulators?*
+
+✅ Best for: **Implementation planning, eligibility design, architecture decisions**
+
+***
+
+## 3. Copay, Exemption & Cost‑Sharing Questions
+
+Very detailed and practical section—great questions include:
+
+*   *How are Medicaid copays configured across contract, group, and member levels?*
+*   *Which populations must always have $0 copays under federal rules?*
+*   *How does pregnancy-based copay exemption work if eligibility data is stale?*
+*   *Can copays be driven by ingredient cost (sliding scale), and how?*
+*   *What NCPDP fields control copay exemption at POS?*
+
+✅ Best for: **Benefit design, state-mandated copay compliance**
+
+***
+
+## 4. Coordination of Benefits (COB) & Payment Integrity
+
+Ask when Medicaid is **payer of last resort**:
+
+*   *How does Express Scripts identify members with Other Health Insurance (OHI)?*
+*   *What is the difference between OPAP and OPPRA COB methodologies?*
+*   *How are reject codes and messaging handled when Medicaid is incorrectly billed as primary?*
+*   *What happens if COB info is missing at point of sale?*
+*   *How does automated OHI/TPL file processing work?*
+
+✅ Best for: **Cost avoidance, capitation accuracy, payment integrity**
+
+***
+
+## 5. Clinical & Utilization Management Questions
+
+Ask when balancing **cost, access, and safety**:
+
+*   *How are state-mandated formularies loaded and maintained?*
+*   *What utilization management rules can be enforced at NDC vs class level?*
+*   *How does Smart PA use ICD‑10 and claim history together?*
+*   *What is “gold carding” and what governance is required to maintain it?*
+*   *How are emergency fills handled for PA, step therapy, or non‑formulary rejects?*
+
+✅ Best for: **Clinical governance, UM strategy, HEDIS improvement**
+
+***
+
+## 6. Controlled Substances & Opioid Management
+
+Strong content for high‑risk categories:
+
+*   *How are DEA class II–V drugs restricted by refill, days‑to‑fill, and quantity rules?*
+*   *How does Express Scripts enforce state‑specific controlled substance laws?*
+*   *What happens when state rules are stricter than federal law?*
+*   *How does Advanced Opioid Management intervene at prescriber, pharmacy, and patient levels?*
+
+✅ Best for: **Risk management, state audits, opioid mitigation programs**
+
+***
+
+## 7. Pharmacy Network & 340B Questions
+
+Ideal for **network strategy and pricing**:
+
+*   *How are pharmacies validated for Medicaid FFS enrollment?*
+*   *What exceptions exist for non‑enrolled or out‑of‑state pharmacies?*
+*   *How are 340B claims identified using NCPDP fields?*
+*   *How does BOCD 08 vs SCC 20 impact claim pricing?*
+*   *Can 340B claims bypass utilization edits like step therapy?*
+
+✅ Best for: **Network design, pricing strategy, 340B compliance**
+
+***
+
+## 8. Encounters & State Reporting Questions
+
+Critical if you’re responsible for **state acceptance rates**:
+
+*   *What’s the difference between Encounter File Service and Encounter Advisor Service?*
+*   *How are rejected encounters analyzed and remediated?*
+*   *Which claim dates (fill, adjudication, check) drive encounter extraction?*
+*   *How are encounter rules updated when state formats change?*
+
+✅ Best for: **State reporting teams, managed care contracts**
+
+***
+
+## 9. Operational Ownership Questions (Very Useful)
+
+These questions clarify **who does what**:
+
+*   *Which responsibilities belong to Express Scripts vs the plan sponsor?*
+*   *What inputs must the plan provide to stay compliant?*
+*   *Which items require explicit plan approval before configuration?*
+*   *What data must be provided during implementation vs ongoing operations?*
