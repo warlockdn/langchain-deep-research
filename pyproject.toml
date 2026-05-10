@@ -31,6 +31,7 @@ dependencies = [
     "ipykernel",
     "mcp",
     "langchain-postgres>=0.0.17",
+    "fastembed>=0.2.0",
     "fastapi",
     "uvicorn[standard]",
 ]
