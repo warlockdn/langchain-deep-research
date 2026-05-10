@@ -17,23 +17,13 @@ def load_script_module():
     return module
 
 
-def test_build_loader_kwargs_uses_pypdf_page_mode():
+def test_build_loader_kwargs_uses_docling_chunk_mode():
     module = load_script_module()
     args = module.parse_args([])
 
     kwargs = module.build_loader_kwargs(args)
 
-    assert kwargs == {
-        "password": None,
-        "headers": None,
-        "extract_images": False,
-        "mode": "page",
-        "images_parser": None,
-        "images_inner_format": "text",
-        "pages_delimiter": "\n\f",
-        "extraction_mode": "plain",
-        "extraction_kwargs": None,
-    }
+    assert kwargs == {"export_type": "doc_chunks"}
 
 
 def test_parse_args_leaves_splitting_disabled_by_default():
@@ -80,7 +70,7 @@ def test_main_prints_per_file_and_total_chunk_counts(monkeypatch, capsys, tmp_pa
                 )
             return iter([Document(page_content="b1", metadata={"filename": "b.pdf"})])
 
-    monkeypatch.setattr(module, "PyPDFLoader", FakeLoader)
+    monkeypatch.setattr(module, "DoclingLoader", FakeLoader)
 
     exit_code = module.main(["--input-dir", str(tmp_path)])
 
@@ -121,7 +111,7 @@ def test_main_falls_back_to_source_basename(monkeypatch, capsys, tmp_path):
                 ]
             )
 
-    monkeypatch.setattr(module, "PyPDFLoader", FakeLoader)
+    monkeypatch.setattr(module, "DoclingLoader", FakeLoader)
 
     exit_code = module.main(["--input-dir", str(tmp_path)])
 
@@ -153,7 +143,7 @@ def test_main_returns_non_zero_when_loader_skips_a_discovered_pdf(
                 )
             return iter([])
 
-    monkeypatch.setattr(module, "PyPDFLoader", FakeLoader)
+    monkeypatch.setattr(module, "DoclingLoader", FakeLoader)
 
     exit_code = module.main(["--input-dir", str(tmp_path)])
 
@@ -197,7 +187,7 @@ def test_main_splits_documents_only_when_split_flag_is_set(
                 ]
             )
 
-    monkeypatch.setattr(module, "PyPDFLoader", FakeLoader)
+    monkeypatch.setattr(module, "DoclingLoader", FakeLoader)
 
     exit_code = module.main(
         [
@@ -253,7 +243,7 @@ def test_main_whitelists_only_expected_pdf_metadata(monkeypatch, capsys, tmp_pat
                 ]
             )
 
-    monkeypatch.setattr(module, "PyPDFLoader", FakeLoader)
+    monkeypatch.setattr(module, "DoclingLoader", FakeLoader)
 
     exit_code = module.main(["--input-dir", str(tmp_path)])
 
@@ -299,7 +289,7 @@ def test_main_persists_final_documents_to_pgvector_when_flag_is_set(
         captured["documents"] = documents
         return {"collection_name": "research_docs", "count": len(documents)}
 
-    monkeypatch.setattr(module, "PyPDFLoader", FakeLoader)
+    monkeypatch.setattr(module, "DoclingLoader", FakeLoader)
     monkeypatch.setattr(module, "store_documents_in_pgvector", fake_store_documents_in_pgvector)
 
     exit_code = module.main(
@@ -351,7 +341,7 @@ def test_main_returns_non_zero_when_pgvector_flag_is_set_without_required_env(
     def fake_store_documents_in_pgvector(documents):
         raise RuntimeError("Document ingestion is unavailable: CONNECTION_STRING and COLLECTION_NAME must both be set.")
 
-    monkeypatch.setattr(module, "PyPDFLoader", FakeLoader)
+    monkeypatch.setattr(module, "DoclingLoader", FakeLoader)
     monkeypatch.setattr(module, "store_documents_in_pgvector", fake_store_documents_in_pgvector)
 
     exit_code = module.main(["--input-dir", str(tmp_path), "--pgvector"])
