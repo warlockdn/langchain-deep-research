@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Save PDF text extracted by PyPDF into JSONL.
+"""Save PDF text extracted by Docling into JSONL.
 
 How it works:
 1. Discover matching PDFs under an input directory.
-2. Load each PDF through LangChain's `PyPDFLoader` in page mode.
-3. Optionally split those page documents into smaller chunks.
+2. Load each PDF through LangChain's `DoclingLoader`.
+3. Optionally split those documents into smaller chunks.
 4. Persist one JSONL row per returned LangChain `Document`.
 5. Print per-file counts, total count, and fail if any discovered PDF produced no rows.
 
@@ -12,7 +12,7 @@ What it writes:
 - `source_file`: basename of the originating PDF
 - `chunk_index`: 1-based per-file row counter
 - `page_content`: extracted page text
-- `metadata`: loader metadata from PyPDF/LangChain
+- `metadata`: loader metadata from Docling/LangChain
 
 Usage:
 ```bash
@@ -45,7 +45,6 @@ uv run python scripts/pdf_chunk_count.py \
 ```
 """
 
-import dotenv
 import argparse
 import json
 import sys
@@ -53,15 +52,15 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+import dotenv
 from langchain_core.runnables import RunnableLambda
-from open_deep_research.tools.pgvector import store_documents_in_pgvector
 
 dotenv.load_dotenv()
 
 try:
-    from langchain_community.document_loaders import PyPDFLoader
+    from langchain_docling.loader import DoclingLoader
 except ImportError:  # pragma: no cover - exercised via runtime guard
-    PyPDFLoader = None
+    DoclingLoader = None
 
 try:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -69,18 +68,10 @@ except ImportError:  # pragma: no cover - exercised via runtime guard
     RecursiveCharacterTextSplitter = None
 
 
-class PyPDFLoaderKwargs(TypedDict):
-    """Typed kwargs mirror for PyPDFLoader to improve editor autocomplete."""
+class DoclingLoaderKwargs(TypedDict):
+    """Typed kwargs mirror for DoclingLoader to improve editor autocomplete."""
 
-    password: str | bytes | None
-    headers: dict[str, str] | None
-    extract_images: bool
-    mode: Literal["single", "page"]
-    images_parser: Any | None
-    images_inner_format: Literal["text", "markdown-img", "html-img"]
-    pages_delimiter: str
-    extraction_mode: Literal["plain", "layout"]
-    extraction_kwargs: dict[str, Any] | None
+    export_type: Literal["doc_chunks", "markdown"]
 
 
 class TextSplitterKwargs(TypedDict):
@@ -99,7 +90,7 @@ ALLOWED_METADATA_KEYS = ("source", "total_pages", "page", "page_label")
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for chunk counting."""
     parser = argparse.ArgumentParser(
-        description="Count LangChain documents produced by PyPDF page loading for PDFs."
+        description="Count LangChain documents produced by Docling for PDFs."
     )
     parser.add_argument("--input-dir", default="docs", help="Directory containing PDFs.")
     parser.add_argument("--glob", default="*.pdf", help="Glob pattern for PDF discovery.")
@@ -110,7 +101,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--split",
         action="store_true",
-        help="Split loaded page documents into smaller chunks before writing JSONL.",
+        help="Split loaded documents into smaller chunks before writing JSONL.",
     )
     parser.add_argument(
         "--chunk-size",
@@ -132,20 +123,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-# Spell out the current PyPDFLoader surface here so editors can autocomplete it.
-def build_loader_kwargs(args: argparse.Namespace) -> PyPDFLoaderKwargs:
-    """Build PyPDF loader kwargs from CLI arguments."""
+# Spell out the current DoclingLoader surface here so editors can autocomplete it.
+def build_loader_kwargs(args: argparse.Namespace) -> DoclingLoaderKwargs:
+    """Build Docling loader kwargs from CLI arguments."""
     del args
     return {
-        "password": None,
-        "headers": None,
-        "extract_images": False,
-        "mode": "page",
-        "images_parser": None,
-        "images_inner_format": "text",
-        "pages_delimiter": "\n\f",
-        "extraction_mode": "plain",
-        "extraction_kwargs": None,
+        "export_type": "markdown",
     }
 
 
@@ -201,17 +184,17 @@ def sanitize_document_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-# Load every matched PDF and flatten the page documents into a single iterable.
+# Load every matched PDF and flatten the extracted documents into a single iterable.
 def load_documents(payload: dict[str, Any]):
     """Load LangChain documents from local PDFs."""
-    if PyPDFLoader is None:
+    if DoclingLoader is None:
         raise RuntimeError(
-            "langchain-community or pypdf is not installed. Add them to your environment first."
+            "langchain-docling is not installed. Add it to your environment first."
         )
 
     documents = []
     for file_path in payload["files"]:
-        loader = PyPDFLoader(str(file_path), **payload["loader_kwargs"])
+        loader = DoclingLoader(file_path=str(file_path), **payload["loader_kwargs"])
         for document in loader.lazy_load():
             document.metadata = sanitize_document_metadata(document.metadata)
             documents.append(document)
@@ -225,7 +208,7 @@ def load_documents(payload: dict[str, Any]):
 
 
 def split_documents(payload: dict[str, Any]) -> dict[str, Any]:
-    """Optionally split loaded page documents into smaller chunks."""
+    """Optionally split loaded documents into smaller chunks."""
     splitter_kwargs = payload["splitter_kwargs"]
     documents = payload["documents"]
     if splitter_kwargs is not None:
@@ -247,6 +230,8 @@ def persist_documents_to_pgvector(payload: dict[str, Any]) -> dict[str, Any]:
     """Optionally store the final emitted documents in PGVector."""
     pgvector_result = None
     if payload["pgvector_enabled"]:
+        from open_deep_research.tools.pgvector import store_documents_in_pgvector
+
         pgvector_result = store_documents_in_pgvector(payload["documents"])
     return {
         "files": payload["files"],
