@@ -118,6 +118,20 @@ uv run python scripts/pdf_chunk_count.py \
   --pgvector
 ```
 
+Same PGVector target, but embed locally with [FastEmbed](https://github.com/qdrant/fastembed) instead of OpenAI (use `--pgvector-fastembed` or `--pgvector`, not both):
+
+```bash
+uv run python scripts/pdf_chunk_count.py \
+  --input-dir docs \
+  --split \
+  --chunk-size 1000 \
+  --chunk-overlap 200 \
+  --pgvector-fastembed
+  --fastembed-model nomic-ai/nomic-embed-text-v1.5
+  
+# optional: --fastembed-model nomic-ai/nomic-embed-text-v1.5
+```
+
 #### Docker (standalone Docling image)
 
 The repo `Dockerfile` builds an AMD64 image that:
@@ -164,7 +178,8 @@ docker run --rm \
 
 - The script uses `DoclingLoader` with `export_type="markdown"` and writes one JSONL record per returned LangChain `Document`.
 - When `--split` is set, the script applies LangChain's `RecursiveCharacterTextSplitter` to those page documents before writing JSONL.
-- When `--pgvector` is set, the script also stores the final emitted documents in the configured PGVector collection using `OPENAI_EMBEDDING_MODEL`, `CONNECTION_STRING`, and `COLLECTION_NAME`.
+- When `--pgvector` is set, the script also stores the final emitted documents in the configured PGVector collection using `OPENAI_EMBEDDING_MODEL` (or `PGVECTOR_EMBEDDING_MODEL`), `CONNECTION_STRING`, and `COLLECTION_NAME`.
+- When `--pgvector-fastembed` is set, ingestion uses local FastEmbed embeddings instead (`fastembed` dependency). Model order: `--fastembed-model`, then `PGVECTOR_FASTEMBED_MODEL`, then default `BAAI/bge-small-en-v1.5`. The agent’s `document_search` tool still queries with OpenAI embeddings unless you change that separately; keep ingest and query embedders aligned for meaningful similarity search.
 - By default, chunk records are written to `<input-dir>/pdf_chunks.jsonl` as JSONL with `source_file`, `chunk_index`, `page_content`, and `metadata`.
 - The script exits non-zero if a discovered PDF produces no chunks, and it prints the missing filenames explicitly instead of silently undercounting.
 
